@@ -1,1 +1,68 @@
-This my first file in test project
+@Service
+public class OrderListener {
+
+    @KafkaListener(topics = "orders-topic")
+    public void processOrder(ConsumerRecord<String, Order> record) {
+        try {
+            validateOrder(record.value());
+        } catch (ValidationException ex) {
+            // Add headers to signal custom DLT handling
+            record.headers().add("DLT-CUSTOM", "true".getBytes());
+            record.headers().add("ERROR-REASON", ex.getMessage().getBytes());
+            throw new RuntimeException("Order validation failed");
+        }
+    }
+}
+
+
+public class HeaderBasedDltRecoverer extends DeadLetterPublishingRecoverer {
+
+    public HeaderBasedDltRecoverer(KafkaTemplate<?, ?> kafkaTemplate) {
+        super(kafkaTemplate);
+    }
+
+    @Override
+    public void recover(ConsumerRecord<?, ?> record, Exception exception) {
+        // Add exception message to headers
+        record.headers().add("EXCEPTION-MESSAGE", exception.getMessage().getBytes());
+        super.recover(record, exception);
+    }
+
+    @Override
+    protected ProducerRecord<?, ?> createProducerRecord(
+        ConsumerRecord<?, ?> originalRecord,
+        Headers headers,
+        String topic,
+        int partition,
+        Object key,
+        Object value
+    ) {
+        // Check for custom DLT header
+        if (headers.lastHeader("DLT-CUSTOM") != null) {
+            String errorReason = new String(headers.lastHeader("ERROR-REASON").value());
+            return buildCustomDltRecord(originalRecord, headers, topic, errorReason);
+        }
+        return super.createProducerRecord(originalRecord, headers, topic, partition, key, value);
+    }
+
+    private ProducerRecord<?, ?> buildCustomDltRecord(
+        ConsumerRecord<?, ?> record,
+        Headers headers,
+        String topic,
+        String errorReason
+    ) {
+        CustomDltMessage customMessage = new CustomDltMessage(
+            "Order processing failed",
+            record.value(),
+            errorReason
+        );
+        return new ProducerRecord<>(
+            topic,
+            record.partition(),
+            record.key(),
+            customMessage,
+            headers
+        );
+    }
+}
+
