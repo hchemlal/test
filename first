@@ -2,67 +2,97 @@
 public class OrderListener {
 
     @KafkaListener(topics = "orders-topic")
-    public void processOrder(ConsumerRecord<String, Order> record) {
+    public void processOrder(Order order) {
         try {
-            validateOrder(record.value());
+            validateOrder(order);  // Your validation logic
         } catch (ValidationException ex) {
-            // Add headers to signal custom DLT handling
-            record.headers().add("DLT-CUSTOM", "true".getBytes());
-            record.headers().add("ERROR-REASON", ex.getMessage().getBytes());
-            throw new RuntimeException("Order validation failed");
+            // Throw custom exception with DLT-specific message
+            throw new CustomDltException("Custom DLT message: " + ex.getMessage(), ex);
         }
     }
 }
 
 
-public class HeaderBasedDltRecoverer extends DeadLetterPublishingRecoverer {
+public class CustomDltRecoverer extends DeadLetterPublishingRecoverer {
 
-    public HeaderBasedDltRecoverer(KafkaTemplate<?, ?> kafkaTemplate) {
+    public CustomDltRecoverer(KafkaTemplate<?, ?> kafkaTemplate) {
         super(kafkaTemplate);
     }
 
     @Override
     public void recover(ConsumerRecord<?, ?> record, Exception exception) {
-        // Add exception message to headers
-        record.headers().add("EXCEPTION-MESSAGE", exception.getMessage().getBytes());
-        super.recover(record, exception);
+        // Check if the exception is CustomDltException
+        if (exception.getCause() instanceof CustomDltException customEx) {
+            // Create new headers with the custom message
+            Headers headers = new RecordHeaders(record.headers().toArray());
+            headers.add("DLT-CUSTOM-MESSAGE", customEx.getDltMessage().getBytes());
+
+            // Create a new ConsumerRecord with the updated headers
+            ConsumerRecord<?, ?> newRecord = new ConsumerRecord<>(
+                record.topic(),
+                record.partition(),
+                record.offset(),
+                record.key(),
+                record.value(),
+                headers
+            );
+
+            super.recover(newRecord, exception);
+        } else {
+            // Default handling for other exceptions
+            super.recover(record, exception);
+        }
     }
 
     @Override
     protected ProducerRecord<?, ?> createProducerRecord(
-        ConsumerRecord<?, ?> originalRecord,
+        ConsumerRecord<?, ?> record,
         Headers headers,
         String topic,
         int partition,
         Object key,
         Object value
     ) {
-        // Check for custom DLT header
-        if (headers.lastHeader("DLT-CUSTOM") != null) {
-            String errorReason = new String(headers.lastHeader("ERROR-REASON").value());
-            return buildCustomDltRecord(originalRecord, headers, topic, errorReason);
+        // Check for custom message header
+        Header customMessageHeader = headers.lastHeader("DLT-CUSTOM-MESSAGE");
+        if (customMessageHeader != null) {
+            return new ProducerRecord<>(
+                topic,
+                partition,
+                key,
+                new String(customMessageHeader.value()),  // Custom message
+                headers
+            );
         }
-        return super.createProducerRecord(originalRecord, headers, topic, partition, key, value);
-    }
 
-    private ProducerRecord<?, ?> buildCustomDltRecord(
-        ConsumerRecord<?, ?> record,
-        Headers headers,
-        String topic,
-        String errorReason
-    ) {
-        CustomDltMessage customMessage = new CustomDltMessage(
-            "Order processing failed",
-            record.value(),
-            errorReason
-        );
-        return new ProducerRecord<>(
-            topic,
-            record.partition(),
-            record.key(),
-            customMessage,
-            headers
-        );
+        // Default: send original record
+        return super.createProducerRecord(record, headers, topic, partition, key, value);
     }
 }
 
+
+@Configuration
+public class KafkaConfig {
+
+    @Bean
+    public CustomDltRecoverer dltRecoverer(KafkaTemplate<String, Object> kafkaTemplate) {
+        return new CustomDltRecoverer(kafkaTemplate);
+    }
+
+    @Bean
+    public DefaultErrorHandler errorHandler(CustomDltRecoverer dltRecoverer) {
+        return new DefaultErrorHandler(dltRecoverer, new FixedBackOff(0L, 0));
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, Object> containerFactory(
+        ConsumerFactory<String, Object> consumerFactory,
+        DefaultErrorHandler errorHandler
+    ) {
+        ConcurrentKafkaListenerContainerFactory<String, Object> factory = 
+            new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        factory.setCommonErrorHandler(errorHandler);
+        return factory;
+    }
+}
