@@ -1,3 +1,47 @@
+public class CustomDltRecoverer extends DeadLetterPublishingRecoverer {
+
+    public CustomDltRecoverer(KafkaTemplate<?, ?> kafkaTemplate) {
+        super(kafkaTemplate);
+    }
+
+    @Override
+    protected ProducerRecord<?, ?> createProducerRecord(
+        ConsumerRecord<?, ?> record,
+        Headers headers,
+        String topic,
+        int partition,
+        Object key,
+        Object value
+    ) {
+        // Check if the exception was CustomDltException
+        Header exceptionTypeHeader = headers.lastHeader(KafkaHeaders.EXCEPTION_TYPE);
+        if (exceptionTypeHeader != null) {
+            String exceptionType = new String(exceptionTypeHeader.value());
+            if (exceptionType.contains("CustomDltException")) {
+                // Extract the exception message
+                Header exceptionMessageHeader = headers.lastHeader(KafkaHeaders.EXCEPTION_MESSAGE);
+                String customMessage = exceptionMessageHeader != null 
+                    ? new String(exceptionMessageHeader.value())
+                    : "Default error message";
+                
+                // Send custom message instead of original record
+                return new ProducerRecord<>(
+                    topic,
+                    partition,
+                    key,
+                    customMessage,  // Your custom string
+                    headers
+                );
+            }
+        }
+
+        // Default behavior: send original record
+        return super.createProducerRecord(record, headers, topic, partition, key, value);
+    }
+}
+
+
+
 @Service
 public class OrderListener {
 
