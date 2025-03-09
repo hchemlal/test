@@ -1,3 +1,10 @@
-Needed for Kafka tests:
+Needed for Kafka junit tests:
 testImplementation 'org.springframework.kafka:spring-kafka-test'
 testImplementation 'org.awaitility:awaitility:4.2.0'
+
+
+Needed for Cucumbers tests:
+testImplementation 'io.cucumber:cucumber-java:7.0.0'
+testImplementation 'io.cucumber:cucumber-junit:7.0.0'
+testImplementation 'io.cucumber:cucumber-spring:7.0.0'
+testImplementation 'org.springframework.kafka:spring-kafka-test'
