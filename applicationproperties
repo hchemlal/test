@@ -1,0 +1,2 @@
+spring.kafka.consumer.auto-offset-reset=earliest
+spring.kafka.listener.ack-mode=MANUAL_IMMEDIATE
