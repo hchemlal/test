@@ -1,0 +1,3 @@
+Needed for Kafka tests:
+testImplementation 'org.springframework.kafka:spring-kafka-test'
+testImplementation 'org.awaitility:awaitility:4.2.0'
