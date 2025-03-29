@@ -1,0 +1,6 @@
+public interface Cache {
+    Object get(String key);
+    void put(String key, Object value);
+    void put(String key, Object value, long ttl);
+    void delete(String key);
+}
