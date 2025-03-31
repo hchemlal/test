@@ -1,0 +1,33 @@
+// src/test/java/com/example/steps/KafkaListenerSteps.java
+public class KafkaListenerSteps {
+
+    @Autowired
+    @Qualifier("externalServiceRestTemplate")
+    private RestTemplate qualifiedRestTemplate;
+
+    private MockRestServiceServer mockServer;
+
+    @Before
+    public void setup() {
+        mockServer = MockRestServiceServer.bindTo(qualifiedRestTemplate).build();
+    }
+
+    @When("the message is produced to {string} Kafka topic")
+    public void produceMessage(String topic) {
+        // Configure mock expectations
+        mockServer.expect(once(), requestTo(anyUri()))
+            .andExpect(method(HttpMethod.POST))
+            .andRespond(withSuccess());
+        
+        // Kafka production logic
+        kafkaTemplate.send(topic, messageContent);
+        
+        // Async verification
+        await().atMost(10, SECONDS).untilAsserted(() -> {
+            assertTrue(mongoTemplate.exists(
+                Query.query(Criteria.where("content").is(messageContent)), 
+                "message_logs"
+            ));
+        });
+    }
+}
