@@ -1,33 +1,67 @@
 // src/test/java/com/example/steps/KafkaListenerSteps.java
 public class KafkaListenerSteps {
-
-    @Autowired
-    @Qualifier("externalServiceRestTemplate")
-    private RestTemplate qualifiedRestTemplate;
-
+    
+    private RestTemplate restTemplate;
+    private MongoTemplate mongoTemplate;
+    private KafkaTemplate<String, String> kafkaTemplate;
     private MockRestServiceServer mockServer;
+    private String messageContent;
 
     @Before
     public void setup() {
-        mockServer = MockRestServiceServer.bindTo(qualifiedRestTemplate).build();
+        // Get qualified RestTemplate
+        this.restTemplate = SpringContext.getBean(
+            "externalServiceRestTemplate", 
+            RestTemplate.class
+        );
+        
+        // Get other beans
+        this.mongoTemplate = SpringContext.getBean(MongoTemplate.class);
+        this.kafkaTemplate = SpringContext.getBean(KafkaTemplate.class);
+        
+        // Initialize mock server
+        this.mockServer = MockRestServiceServer.bindTo(restTemplate).build();
+        
+        // Clean MongoDB before each scenario
+        mongoTemplate.dropCollection("message_logs");
+    }
+
+    @Given("a test message with content {string}")
+    public void createTestMessage(String content) {
+        this.messageContent = content;
     }
 
     @When("the message is produced to {string} Kafka topic")
     public void produceMessage(String topic) {
-        // Configure mock expectations
         mockServer.expect(once(), requestTo(anyUri()))
             .andExpect(method(HttpMethod.POST))
+            .andExpect(content().string(messageContent))
             .andRespond(withSuccess());
         
-        // Kafka production logic
         kafkaTemplate.send(topic, messageContent);
         
-        // Async verification
-        await().atMost(10, SECONDS).untilAsserted(() -> {
-            assertTrue(mongoTemplate.exists(
-                Query.query(Criteria.where("content").is(messageContent)), 
+        await().atMost(10, SECONDS).until(() -> 
+            mongoTemplate.exists(
+                Query.query(Criteria.where("content").is(messageContent)),
                 "message_logs"
-            ));
-        });
+            )
+        );
+    }
+
+    @Then("the application should send the message to {string} API")
+    public void verifyApiCall(String expectedUrl) {
+        mockServer.verify();
+    }
+
+    @Then("a message log record should exist in MongoDB {string} collection with status {string}")
+    public void verifyMongoRecord(String collection, String status) {
+        Document doc = mongoTemplate.findOne(
+            Query.query(Criteria.where("content").is(messageContent)),
+            Document.class,
+            collection
+        );
+        
+        assertNotNull(doc, "MongoDB record missing");
+        assertEquals(status, doc.getString("status"));
     }
 }
