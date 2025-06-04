@@ -1,0 +1,25 @@
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class PriceLogger {
+    // Create a dedicated logger for price operations
+    private static final Logger priceLogger = LoggerFactory.getLogger("PriceLogger");
+    
+    // Read environment variable once at class loading
+    private static final boolean useDebugLevel = 
+        "DEBUG".equalsIgnoreCase(System.getenv("PRICE_LOG_LEVEL"));
+
+    public void logPrice(double price) {
+        if (useDebugLevel) {
+            priceLogger.debug("Fetched external price: {}", price);
+        } else {
+            priceLogger.info("Fetched external price: {}", price);
+        }
+    }
+
+    // Example usage
+    public static void main(String[] args) {
+        PriceLogger logger = new PriceLogger();
+        logger.logPrice(150.75);
+    }
+}
