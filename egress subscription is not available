@@ -1,0 +1,28 @@
+In our Kafka-GW, and upon startup, we use the Replay Channel to join from our last known "Egress Position", which is usually 0 (not always).
+All we do is use the Replay Channel to catchup and with the expectation that it will join the live channel upon "Replay Merge", but unfortunately we get the error I am showing below at the bottom.
+
+Here's how we set the replay channel:
+======================================================================
+public GatewayContext(final KafkaGatewayContext kafkaGatewayContext,
+                          final KafkaClient kafkaClient,
+                          final JoinPositionProvider joinPositionProvider)
+    {
+        this.kafkaGatewayContext = kafkaGatewayContext;
+        this.kafkaClient = kafkaClient;
+        this.replayChannel = kafkaGatewayContext.createReplayChannelToCluster();
+        this.joinPositionProvider = joinPositionProvider;
+        this.nodeId = kafkaGatewayContext.config().getInt("kafka.nodeId");
+    }
+
+The above constructor is called like so:[
+	final var gatewayContext = new GatewayContext(kafkaGatewayConnection.services(), kafkaClient, joinPositionProvider);
+======================================================================
+
+Here's what we see in the log:
+**************************************************************************
+2025-10-08T11:56:24.286Z [KafkaGateway] INFO com.weareadaptive.hydra.cluster.core.client.ClusterClientGatewayAgent - disconnecting because: 'egress subscription is not available.'
+2025-10-08T11:56:24.286Z [KafkaGateway] WARN com.weareadaptive.hydra.platform.client.bindings.real.PlatformClusterClientService - Connection to the cluster has been lost.
+2025-10-08T11:56:24.286Z [KafkaGateway] INFO com.weareadaptive.hydra.cluster.core.egress.EgressClient - Image unavailable for egress subscription (sessionId: -17973521, lost @ 70400)
+2025-10-08T11:56:24.286Z [KafkaGateway] WARN com.weareadaptive.hydra.platform.core.bindings.SessionLifetimePublicationSendStrategy - Dropped cancellation message due to not being connected. Service=AuditService Method=subscribe
+2025-10-08T11:56:24.286Z [KafkaGateway] WARN com.weareadaptive.hydra.platform.core.bindings.SessionLifetimePublicationSendStrategy - Dropped cancellation message due to not being connected. Service=DirectoryService Method=register
+**************************************************************************
