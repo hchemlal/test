@@ -1,3 +1,12 @@
+ /**
+     * Creates a replay channel for replaying events. <p> All replay channels are cancelled when disconnected from
+     * the cluster. If you need the replay to resume after a reconnect, consider creating it in an {@code
+     * onAvailable} lifecycle handler.
+     * @return a {@link Replay} to subscribe to events and initiate a replay
+     */
+    Replay<? extends ClientToEngineChannel> createReplayChannelToCluster();
+
+
 In our Kafka-GW, and upon startup, we use the Replay Channel to join from our last known "Egress Position", which is usually 0 (not always).
 All we do is use the Replay Channel to catchup and with the expectation that it will join the live channel upon "Replay Merge", but unfortunately we get the error I am showing below at the bottom.
 
