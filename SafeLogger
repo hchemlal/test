@@ -1,0 +1,148 @@
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class SafeLogger {
+    private static final Logger logger = LoggerFactory.getLogger(SafeLogger.class);
+    private static final int MAX_LOG_SIZE_BYTES = 16 * 1024; // 16KB in bytes
+    
+    /**
+     * Safely logs a message, splitting if it exceeds 16KB
+     */
+    public void safeLog(String message) {
+        if (message == null) {
+            logger.info("null");
+            return;
+        }
+        
+        // Check size in bytes (more accurate than character count for UTF-8)
+        byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+        
+        if (messageBytes.length <= MAX_LOG_SIZE_BYTES) {
+            // Within limit - log normally
+            logger.info(message);
+        } else {
+            // Exceeds limit - split into chunks
+            logInChunks(message, messageBytes);
+        }
+    }
+    
+    private void logInChunks(String message, byte[] messageBytes) {
+        List<String> chunks = splitIntoChunks(message, messageBytes);
+        int totalChunks = chunks.size();
+        
+        for (int i = 0; i < totalChunks; i++) {
+            String chunk = chunks.get(i);
+            // Add chunk header to each part
+            logger.info("[Part {}/{}] {}", (i + 1), totalChunks, chunk);
+        }
+        
+        // Log summary
+        logger.warn("Original message was {} bytes (max allowed: {} bytes). Split into {} parts.",
+                   messageBytes.length, MAX_LOG_SIZE_BYTES, totalChunks);
+    }
+    
+    private List<String> splitIntoChunks(String message, byte[] messageBytes) {
+        List<String> chunks = new ArrayList<>();
+        
+        // Convert back to string for safe splitting
+        String remaining = message;
+        
+        while (!remaining.isEmpty()) {
+            // Find how many characters we can take
+            int chunkSize = findSafeChunkSize(remaining);
+            
+            if (chunkSize <= 0) {
+                // If we can't find a safe chunk size, take at least 1 character
+                chunkSize = 1;
+            }
+            
+            String chunk = remaining.substring(0, chunkSize);
+            chunks.add(chunk);
+            remaining = remaining.substring(chunkSize);
+        }
+        
+        return chunks;
+    }
+    
+    private int findSafeChunkSize(String text) {
+        if (text.isEmpty()) return 0;
+        
+        // Binary search to find maximum characters that fit in 16KB
+        int low = 1;
+        int high = text.length();
+        int best = 1;
+        
+        while (low <= high) {
+            int mid = low + (high - low) / 2;
+            String candidate = text.substring(0, mid);
+            int byteSize = candidate.getBytes(StandardCharsets.UTF_8).length;
+            
+            if (byteSize <= MAX_LOG_SIZE_BYTES) {
+                best = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+        
+        return best;
+    }
+    
+    /**
+     * Alternative simpler approach - split by character count approximation
+     * (Less accurate but faster)
+     */
+    public void safeLogSimple(String message) {
+        if (message == null) {
+            logger.info("null");
+            return;
+        }
+        
+        // Rough estimate: assume worst case 4 bytes per character
+        int estimatedBytes = message.length() * 4;
+        
+        if (estimatedBytes <= MAX_LOG_SIZE_BYTES) {
+            // Check actual size to be sure
+            byte[] actualBytes = message.getBytes(StandardCharsets.UTF_8);
+            if (actualBytes.length <= MAX_LOG_SIZE_BYTES) {
+                logger.info(message);
+                return;
+            }
+        }
+        
+        // Need to split - use simpler character-based splitting
+        int safeCharCount = MAX_LOG_SIZE_BYTES / 4; // Conservative estimate
+        
+        List<String> chunks = new ArrayList<>();
+        for (int i = 0; i < message.length(); i += safeCharCount) {
+            int end = Math.min(i + safeCharCount, message.length());
+            chunks.add(message.substring(i, end));
+        }
+        
+        for (int i = 0; i < chunks.size(); i++) {
+            logger.info("[Part {}/{}] {}", (i + 1), chunks.size(), chunks.get(i));
+        }
+    }
+}
+
+// Usage example
+public class Example {
+    private static final SafeLogger safeLogger = new SafeLogger();
+    
+    public void processLargeData() {
+        // Generate some large content
+        StringBuilder largeContent = new StringBuilder();
+        for (int i = 0; i < 10000; i++) {
+            largeContent.append("Sample data line ").append(i).append("\n");
+        }
+        
+        // This will automatically split if > 16KB
+        safeLogger.safeLog(largeContent.toString());
+        
+        // Or use the simpler version
+        safeLogger.safeLogSimple(largeContent.toString());
+    }
+}
