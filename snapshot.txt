@@ -1,0 +1,407 @@
+# How to Detect if a Snapshot Was Used and Loaded in Hydra/Arcadia
+
+## Overview
+
+This document explains how to determine if an Aeron Cluster snapshot was used during Engine startup, based on the Hydra source code analysis.
+
+---
+
+## Method 1: Check Application Logs (DEFINITIVE)
+
+From the Hydra source code (`PlatformClusterService.java` lines 330-343):
+
+```java
+if (null == snapshotImage) {
+    createSeedData();  // No snapshot - starting fresh
+} else {
+    log.info("Restoring snapshot.").log();  // ← SNAPSHOT LOADING STARTS
+    PlatformSnapshotRestorer.restore(...);
+    readHostPropertiesTable();
+    appContainer.restoreSnapshot(snapshotImage);
+    log.info("Snapshot restored.").log();   // ← SNAPSHOT LOADING COMPLETE
+}
+```
+
+### What to look for in your logs:
+
+```bash
+grep -i "restoring snapshot\|snapshot restored" logs/engine*.log
+```
+
+### If snapshot was used:
+```
+INFO  Platform cluster service started. LogPosition=12345
+INFO  Restoring snapshot.
+INFO  Snapshot restored.
+```
+
+### If NO snapshot (fresh start or replaying all ingress):
+```
+INFO  Platform cluster service started. LogPosition=0
+# No "Restoring snapshot" message
+```
+
+---
+
+## Method 2: Check Log Position on Startup
+
+From line 315 in `PlatformClusterService.java`:
+```java
+log.info("Platform cluster service started. LogPosition=").append(cluster.logPosition()).log();
+```
+
+### Interpretation:
+- **LogPosition=0**: Starting fresh, no snapshot
+- **LogPosition=5000**: Started from position 5000 (snapshot was loaded)
+
+After this, ingress replay happens (if needed) to catch up from snapshot position to current position.
+
+---
+
+## Method 3: Check LoadedSnapshotPosition
+
+The Hydra cluster tracks the loaded snapshot position via the `LoadedSnapshotPosition` interface:
+
+```java
+// From LoadedSnapshotPosition.java
+public interface LoadedSnapshotPosition {
+  void onStart(Aeron aeron);
+  void set(long loadedSnapshotPosition);
+  long get();
+}
+```
+
+This value is set when a snapshot is loaded.
+
+---
+
+## Method 4: Check Filesystem for Snapshots
+
+```bash
+ls -lh hydra-data/cluster-node/cluster/snapshots/
+
+# Example output if snapshots exist:
+# -rw-r--r--  1 user  staff   5.2M Jan 30 10:00 snapshot-123456-1-5000.dat
+# -rw-r--r--  1 user  staff   5.3M Jan 30 11:00 snapshot-123456-1-10000.dat
+```
+
+### Filename format:
+`snapshot-<recordingId>-<leadershipTermId>-<logPosition>.dat`
+
+The **logPosition** in the filename (e.g., `5000`, `10000`) indicates the ingress log position at which the snapshot was taken.
+
+---
+
+## Method 5: Use Hydra CLI Tool
+
+```bash
+cd local-toolbox
+
+# List snapshots
+./mydra.sh snapshots list
+
+# Example output:
+# Snapshot at logPosition=5000, term=1, timestamp=2025-01-30T10:00:00.123Z
+# Snapshot at logPosition=10000, term=1, timestamp=2025-01-30T11:00:00.456Z
+```
+
+---
+
+## Complete Startup Flow with Snapshot
+
+Here's what actually happens during Engine startup (from the Hydra source code):
+
+```
+1. Engine starts
+   └─> ClusterNode.onStart() called
+
+2. Aeron Cluster checks for snapshots
+   └─> If snapshot exists: loads snapshot image
+   └─> If no snapshot: snapshotImage = null
+
+3. PlatformClusterService.onStart(cluster, snapshotImage) called
+   
+   Log: "Platform cluster service started. LogPosition=XXXXX"
+   
+   If snapshotImage == null:
+     Log: (no snapshot message)
+     └─> createSeedData() - initialize from scratch
+     └─> Replay ALL ingress from position 0
+   
+   If snapshotImage != null:
+     Log: "Restoring snapshot."
+     └─> PlatformSnapshotRestorer.restore() - restore platform state
+     └─> appContainer.restoreSnapshot() - restore your Engine database
+     Log: "Snapshot restored."
+     └─> Replay ingress from snapshot position to current
+
+4. Bootstrap your application
+   └─> BOOTSTRAPPER.bootstrap(context) runs
+   └─> Your database is now populated (from snapshot or replay)
+
+5. Engine ready to accept commands
+```
+
+---
+
+## How to Add Snapshot Detection to Your Code
+
+Modify your `EngineMain.java`:
+
+```java
+public static final EngineBootstrapper BOOTSTRAPPER = context ->
+{
+    final Logger logger = LoggerFactory.getNotThreadSafeLogger(EngineMain.class);
+    
+    // Check database state to determine if snapshot was loaded
+    final var database = auctionDatabaseWithMigrations();
+    context.registerDatabase(database);
+    
+    long auctionCount = database.auction().count();
+    long propositionCount = database.propositionRecord().count();
+    long awardCount = database.propositionAward().count();
+    
+    logger.info("=== ENGINE BOOTSTRAP STATE ===")
+        .append("\n  Cluster LogPosition: ").append(context.clusterPosition())
+        .append("\n  Auctions: ").append(auctionCount)
+        .append("\n  Propositions: ").append(propositionCount)
+        .append("\n  Awards: ").append(awardCount)
+        .log();
+    
+    if (auctionCount > 0) {
+        logger.info("✓ SNAPSHOT WAS LOADED - Database contains existing data").log();
+    } else {
+        logger.info("✗ NO SNAPSHOT - Starting fresh or replaying all ingress").log();
+    }
+    
+    // Continue normal bootstrap...
+};
+```
+
+---
+
+## Summary Table
+
+| Method | Log Message to Find | What It Tells You |
+|--------|-------------------|-------------------|
+| **Log Message** | `Restoring snapshot.` | Snapshot loading started |
+| **Log Message** | `Snapshot restored.` | Snapshot loading completed |
+| **Log Position** | `LogPosition=0` | No snapshot, starting fresh |
+| **Log Position** | `LogPosition=5000` | Started from snapshot at position 5000 |
+| **Database Check** | Row count > 0 on startup | Data was restored from snapshot |
+| **Filesystem** | Files in `snapshots/` directory | Snapshots are available |
+| **CLI Tool** | `./mydra.sh snapshots list` | Shows all available snapshots |
+
+---
+
+## Investigation Example: Awards Bug Scenario
+
+For investigating the awards bug with index synchronization:
+
+```bash
+# 1. Check if snapshot was used in your run
+grep -A 5 "Platform cluster service started" logs/engine.log | grep -E "LogPosition|Restoring"
+
+# If you see:
+# LogPosition=5000
+# Restoring snapshot.
+# Snapshot restored.
+# → Snapshot was used, started from position 5000
+
+# 2. Check how many messages were replayed after snapshot
+./mydra.sh cat log | wc -l
+# If total ingress is 10000 messages and snapshot was at 5000
+# Then 5000 messages were replayed after snapshot load
+
+# 3. Check database state after startup
+# Add logging in EngineMain.java to see row counts
+
+# 4. Verify index state
+# The index should be rebuilt during snapshot restoration
+# Check if PropositionAwardIndex has correct entries
+```
+
+---
+
+## Key Insights from Hydra Source Code
+
+### From PlatformClusterService.java:
+
+1. **Snapshot Restoration (line 333-343)**:
+   - Platform state restored first (NodeContext, ChannelState)
+   - Then application database (your Engine database)
+   - Correlation IDs and leadership state restored from snapshot
+
+2. **Index Rebuilding**:
+   - When snapshot is loaded, `appContainer.restoreSnapshot()` is called
+   - This should rebuild all repository indexes
+   - Index state should be consistent with repository state
+
+3. **Bootstrap After Snapshot** (optional feature):
+   - Config: `bootstrapAfterSnapshot=true`
+   - Takes snapshot during startup
+   - Closes and re-bootstraps app container
+   - Useful for testing snapshot/restore cycles
+
+### From LoadedSnapshotPosition.java:
+
+```java
+public interface LoadedSnapshotPosition {
+  void set(long loadedSnapshotPosition);  // Set when snapshot loaded
+  long get();                              // Query snapshot position
+}
+```
+
+This is updated in line 352 of PlatformClusterService:
+```java
+if (snapshotMemory != null) {
+    loadedSnapshotPosition.set(cluster.logPosition());
+}
+```
+
+---
+
+## Snapshot vs Ingress Replay
+
+### Understanding the Difference:
+
+1. **Fresh Start (No Snapshot)**:
+   ```
+   Position 0 → Replay all ingress → Position 10000
+   Database empty → Process 10000 commands → Database populated
+   Time: SLOW (process all commands)
+   ```
+
+2. **With Snapshot**:
+   ```
+   Position 0 → Load snapshot → Position 5000 → Replay ingress → Position 10000
+   Database empty → Load from snapshot → Replay 5000 commands → Database updated
+   Time: FASTER (skip first 5000 commands)
+   ```
+
+### Why Index Issues Can Occur:
+
+1. **Snapshot loads repository data**
+2. **Index must be rebuilt from repository**
+3. **If index doesn't poll/rebuild correctly**:
+   - Index state = stale (from before snapshot)
+   - Repository state = current (from snapshot)
+   - MISMATCH → bugs like missing awards
+
+### Solution:
+
+Always call `index.doEndOfUnitOfWorkProcessing()` or `host.pollForChangedRows()` after snapshot restoration to ensure index consistency.
+
+---
+
+## Hydra Source Code Locations
+
+For reference, key files in Hydra codebase:
+
+- **PlatformClusterService.java**: 
+  `/Users/b1hxc12/projects/hydra-develop/java/platform/hydra-platform-engine/src/main/java/com/weareadaptive/hydra/platform/engine/bindings/real/PlatformClusterService.java`
+
+- **LoadedSnapshotPosition.java**:
+  `/Users/b1hxc12/projects/hydra-develop/java/cluster/hydra-cluster-core/src/main/java/com/weareadaptive/hydra/cluster/core/LoadedSnapshotPosition.java`
+
+- **HydraClusterNodeBinding.java**:
+  `/Users/b1hxc12/projects/hydra-develop/java/platform/hydra-platform-engine/src/main/java/com/weareadaptive/hydra/platform/engine/bindings/real/HydraClusterNodeBinding.java`
+
+---
+
+## Testing Snapshot Behavior
+
+### Test 1: Force Fresh Start
+```bash
+# Delete snapshots
+rm -rf hydra-data/cluster-node/cluster/snapshots/*
+
+# Start engine
+./gradlew startBackend
+
+# Check logs - should see LogPosition=0 and no "Restoring snapshot" message
+grep -E "LogPosition|Restoring" logs/engine.log
+```
+
+### Test 2: With Snapshot
+```bash
+# Take a snapshot
+./mydra.sh snapshots trigger
+
+# Stop engine
+./gradlew stopServices
+
+# Clear data but keep snapshots
+rm -rf hydra-data/cluster-node/cluster/log/*
+
+# Start engine
+./gradlew startBackend
+
+# Check logs - should see "Restoring snapshot" and LogPosition > 0
+grep -E "LogPosition|Restoring" logs/engine.log
+```
+
+### Test 3: Compare Startup Times
+```bash
+# Measure startup time without snapshot
+time ./gradlew startBackend
+
+# Measure startup time with snapshot
+time ./gradlew startBackend
+
+# Snapshot startup should be significantly faster if ingress log is large
+```
+
+---
+
+## Troubleshooting
+
+### Issue: Snapshot exists but not loaded
+
+**Symptoms:**
+- Snapshot files exist in `snapshots/` directory
+- But logs show `LogPosition=0`
+- No "Restoring snapshot" message
+
+**Possible causes:**
+- Snapshot is corrupted
+- Snapshot version mismatch
+- Snapshot from different cluster configuration
+
+**Solution:**
+```bash
+# Verify snapshot integrity
+./mydra.sh snapshots list
+
+# Export snapshot to readable format
+./mydra.sh snapshots export json
+
+# Check for errors in export
+```
+
+### Issue: Index out of sync after snapshot
+
+**Symptoms:**
+- Repository has N records
+- Index returns M records (N ≠ M)
+- Missing or duplicate data
+
+**Cause:**
+- Index not polled after snapshot restoration
+- Index query happens before rebuild completes
+
+**Solution:**
+Add explicit polling in queries:
+```java
+public List<Long> getMostRecentPropAwardIds(final long propositionId) {
+    // ✓ Poll FIRST to ensure index reflects snapshot state
+    host.pollForChangedRows(lastSeenMutationSeqNo, this);
+    
+    // Now query
+    return idsToRowIndex.keySet().stream()...
+}
+```
+
+---
+
+## End of Document
