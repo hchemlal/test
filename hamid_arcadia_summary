@@ -2,25 +2,52 @@
 
 ## Project Overview
 
-I contributed to the **Arcadia trading and auction platform**, a mission-critical financial system built on the **Hydra framework** and **Aeron Cluster** for high-performance, distributed transaction processing. Arcadia provides a comprehensive solution for conducting Federal Reserve market operations, including repo, reverse repo, MBS, and Treasury securities auctions, with real-time processing and guaranteed consistency across distributed components.
+I contributed to the **Arcadia trading and auction platform**, system built on the **Hydra framework** and **Aeron Cluster** for high-performance, distributed transaction processing. 
+
+Arcadia provides a comprehensive solution for conducting Federal Reserve market operations, including repo, reverse repo, MBS, and Treasury securities auctions,
+with real-time processing and guaranteed consistency across distributed components.
 
 ## Core Contributions
 
 ### Microservices Gateway Development
 
-My primary focus was **designing and implementing microservices gateways** that extended Arcadia's capabilities beyond the core Engine cluster. I developed the **EventHub Gateway** for Azure Event Hubs integration, the **Kafka Gateway** for event streaming and message broker connectivity, the **Downstream Gateway** for publishing auction results to external systems (SPIRE, MILAN), and the **Priming Service** for initializing gateway state from the Engine's cluster database. These services utilized Hydra's platform architecture with custom channel implementations, leveraged Aeron's low-latency messaging for inter-service communication, and employed event-driven patterns to ensure eventual consistency across distributed components.
+My primary focus was **designing and implementing clustered services ** that extended Arcadia's capabilities beyond the core Engine cluster. 
+I developed the **EventHub Gateway** for Azure Event Hubs integration, the **Kafka Gateway** for event streaming and message broker connectivity, 
+the **Downstream Gateway** for publishing auction results to external systems (SPIRE, MILAN), 
+and the **Priming Service** for initializing gateway state from the Engine's cluster database. 
+
+These services utilized Hydra's platform architecture with custom channel implementations, leveraged Aeron's low-latency messaging for inter-service communication, 
+and employed event-driven patterns to ensure eventual consistency across distributed components.
 
 ### Aeron Cluster Architecture Expertise
 
-I possess deep technical knowledge of the **Aeron Cluster consensus module** and Hydra's message flow architecture. I understand how client publishers establish sessions and send messages to the Engine's ingress subscription channel, how the Engine decodes message headers to route requests to specific services and methods through Hydra's channel protocol, and how the Engine publishes responses back through the egress channel to client subscribers. I'm well-versed in the **Engine startup and recovery mechanisms**, including how the consensus module restores state from snapshots (loading repository data and rebuilding indexes), followed by ingress log replay from the snapshot position to current to catch up on any transactions that occurred after the snapshot was taken, ensuring the Engine reaches a consistent state before processing new messages.
+I possess deep technical knowledge of the **Aeron Cluster consensus module** and Hydra's message flow architecture. 
+I understand how client publishers establish sessions and send messages to the Engine's ingress subscription channel, 
+how the Engine decodes message headers to route requests to specific services and methods through Hydra's channel protocol, 
+and how the Engine publishes responses back through the egress channel to client subscribers. 
+
+I'm well-versed in the **Engine startup and recovery mechanisms**, including how the consensus module restores state from snapshots (loading repository data and rebuilding indexes), 
+followed by ingress log replay from the snapshot position to current to catch up on any transactions that occurred after the snapshot was taken, ensuring the Engine reaches a consistent state before processing new messages.
 
 ### Knowledge Sharing
 
-I **delivered a recorded brownbag presentation** to the team and broader audience, explaining the Aeron Cluster architecture—specifically how gateway clients communicate with the cluster, how only the leader node receives and responds to client commands, and how follower nodes receive replicated commands from the leader's consensus module and execute them identically without sending client responses, ensuring deterministic state replication across all nodes for high availability and fault tolerance.
+I **delivered a recorded brownbag presentation** to the team and broader audience, explaining the Aeron Cluster architecture—specifically 
+how gateway clients communicate with the cluster, how only the leader node receives and responds to client commands, 
+and how follower nodes receive replicated commands from the leader's consensus module and execute them identically without sending client responses, ensuring deterministic state replication across all nodes 
+for high availability and fault tolerance.
 
 ### Performance Tuning and Optimization
 
-Beyond service development, I performed critical **performance tuning and architectural optimization** of the Hydra/Aeron infrastructure. When faced with message length limitations, I tuned Aeron's fragment length parameters, Hydra's buffer pool configurations, and message serialization strategies to accommodate large payloads without compromising throughput. I analyzed and optimized code patterns to reduce buffer hold times, moving expensive database queries outside of try-with-resources blocks to release Hydra codec buffers faster. I also identified and resolved a critical **session management issue** where bypass initiator gateways communicating with the Integration Gateway were creating connection patterns that triggered rate-limiting defenses, appearing as potential attacks and causing session saturation and resource exhaustion. I recommended and implemented connection pooling strategies, session reuse patterns, and proper bypass service communication protocols that eliminated false-positive attack detection while maintaining security boundaries and dramatically improving system stability under high load.
+Beyond service development, I performed critical **performance tuning and architectural optimization** of the Hydra/Aeron infrastructure. 
+When faced with message length limitations, I tuned Aeron's fragment length parameters, Hydra's buffer pool configurations,
+to accommodate large payloads without compromising throughput.
+
+I analyzed and optimized code patterns to reduce buffer hold times:
+moving expensive database queries outside of try-with-resources blocks to release Hydra codec buffers faster. 
+
+I also identified and resolved a critical **session management issue** where bypass initiator gateways communicating with the Integration Gateway were creating connection 
+appearing as potential attacks and causing session saturation and resource exhaustion. 
+
 
 ## Technical Skills Demonstrated
 
@@ -53,8 +80,7 @@ Beyond service development, I performed critical **performance tuning and archit
 - Multi-protocol gateway design
 
 ### Problem Solving
-- Session management and connection pooling
-- Rate limiting and attack detection mitigation
+- Session management
 - Memory and resource optimization
 - System stability under high load
 - Production incident resolution
@@ -78,5 +104,3 @@ Beyond service development, I performed critical **performance tuning and archit
 - **Architecture Patterns**: Event-driven, Microservices, CQRS, Event Sourcing
 
 ---
-
-*This summary reflects work on a mission-critical Federal Reserve trading platform handling high-value financial transactions with strict reliability, consistency, and auditability requirements.*
